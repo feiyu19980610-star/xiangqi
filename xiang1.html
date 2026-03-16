@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="format-detection" content="telephone=no">
+    <title>双人象棋</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
+            touch-action: manipulation;
+        }
+        
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            position: fixed;
+        }
+        
+        body {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 10px;
+        }
+        
+        h1 {
+            color: #e94560;
+            margin-bottom: 8px;
+            font-size: 1.4rem;
+            text-shadow: 0 0 10px rgba(233, 69, 96, 0.5);
+            flex-shrink: 0;
+        }
+        
+        .status {
+            color: #fff;
+            margin-bottom: 8px;
+            font-size: 1rem;
+            padding: 6px 16px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 20px;
+            flex-shrink: 0;
+        }
+        
+        .board-container {
+            position: relative;
+            width: 95vw;
+            max-width: 380px;
+            flex: 1;
+            min-height: 0;
+            background: #f0d9b5;
+            border-radius: 8px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+            overflow: hidden;
+        }
+        
+        #board {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        
+        .controls {
+            margin-top: 10px;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 20px;
+            background: linear-gradient(45deg, #e94560, #ff6b6b);
+            color: white;
+            font-size: 0.9rem;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(233, 69, 96, 0.4);
+        }
+        
+        button:active {
+            opacity: 0.8;
+        }
+        
+        button.secondary {
+            background: linear-gradient(45deg, #0f3460, #533483);
+            box-shadow: 0 4px 15px rgba(15, 52, 96, 0.4);
+        }
+        
+        .captured-area {
+            margin-top: 8px;
+            min-height: 30px;
+            flex-shrink: 0;
+            text-align: center;
+        }
+        
+        .captured-label {
+            color: #aaa;
+            font-size: 0.8rem;
+            margin-bottom: 4px;
+        }
+        
+        .captured {
+            display: flex;
+            gap: 4px;
+            flex-wrap: wrap;
+            justify-content: center;
+            min-height: 28px;
+        }
+        
+        .captured-piece {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: bold;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+        }
+        
+        .captured-red {
+            background: #ff4444;
+            color: white;
+            border: 2px solid #cc0000;
+        }
+        
+        .captured-black {
+            background: #333;
+            color: white;
+            border: 2px solid #000;
+        }
+        
+        .rules {
+            margin-top: 8px;
+            color: #aaa;
+            font-size: 0.75rem;
+            text-align: center;
+            flex-shrink: 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>♟️ 双人象棋</h1>
+    <div class="status" id="status">红方走棋</div>
+    
+    <div class="board-container" id="boardContainer">
+        <canvas id="board"></canvas>
+    </div>
+    
+    <div class="captured-area">
+        <div class="captured-label">被吃掉的棋子</div>
+        <div class="captured" id="captured"></div>
+    </div>
+    
+    <div class="controls">
+        <button onclick="game.undo()">↩️ 悔棋</button>
+        <button onclick="game.restart()" class="secondary">🔄 重新开始</button>
+    </div>
+    
+    <div class="rules">
+        💡 红方先行，轮流走棋 | 点击棋子选中，再点击移动
+    </div>
+
+    <script>
+        // 防止微信下拉刷新和上拉露出网页来源
+        document.body.addEventListener('touchmove', function(e) {
+            if (e.target === document.body || e.target.id === 'board') {
+                e.preventDefault();
+            }
+        }, { passive: false });
+        
+        class ChineseChess {
+            constructor() {
+                this.canvas = document.getElementById('board');
+                this.ctx = this.canvas.getContext('2d');
+                this.container = document.getElementById('boardContainer');
+                this.statusEl = document.getElementById('status');
+                this.capturedEl = document.getElementById('captured');
+                
+                this.cellSize = 0;
+                this.padding = 0;
+                this.selected = null;
+                this.currentPlayer = 'red';
+                this.history = [];
+                this.capturedPieces = [];
+                
+                // 微信内置浏览器需要等待完全加载
+                window.onload = () => {
+                    setTimeout(() => this.init(), 100);
+                };
+            }
+            
+            init() {
+                this.setupCanvas();
+                this.setupEvents();
+                this.reset();
+            }
+            
+            setupCanvas() {
+                // 获取容器尺寸
+                const rect = this.container.getBoundingClientRect();
+                const width = Math.floor(rect.width);
+                const height = Math.floor(rect.height);
+                
+                // 微信 X5 内核需要显式设置宽高属性
+                this.canvas.width = width;
+                this.canvas.height = height;
+                this.canvas.style.width = width + 'px';
+                this.canvas.style.height = height + 'px';
+                
+                // 计算格子大小（9列10行）
+                this.cellSize = Math.min(width / 9, height / 10) * 0.9;
+                this.paddingX = (width - this.cellSize * 8) / 2;
+                this.paddingY = (height - this.cellSize * 9) / 2;
+                
+                console.log('Canvas:', width, height, 'Cell:', this.cellSize);
+            }
+            
+            setupEvents() {
+                // 使用 pointer 事件统一处理鼠标和触摸（微信支持较好）
+                const handleStart = (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    
+                    const rect = this.canvas.getBoundingClientRect();
+                    const clientX = e.clientX || (e.touches && e.touches[0].clientX);
+                    const clientY = e.clientY || (e.touches && e.touches[0].clientY);
+                    
+                    if (!clientX || !clientY) return;
+                    
+                    const x = clientX - rect.left;
+                    const y = clientY - rect.top;
+                    
+                    this.handleClick(x, y);
+                };
+                
+                // 同时支持多种事件类型
+                this.canvas.addEventListener('touchstart', handleStart, {passive: false});
+                this.canvas.addEventListener('mousedown', handleStart);
+                
+                // 防止微信双击缩放
+                let lastTouchEnd = 0;
+                this.canvas.addEventListener('touchend', function(e) {
+                    const now = Date.now();
+                    if (now - lastTouchEnd <= 300) {
+                        e.preventDefault();
+                    }
+                    lastTouchEnd = now;
+                }, false);
+                
+                // 窗口变化时重绘
+                window.addEventListener('resize', () => {
+                    setTimeout(() => {
+                        this.setupCanvas();
+                        this.draw();
+                    }, 100);
+                });
+            }
+            
+            handleClick(x, y) {
+                const cs = this.cellSize;
+                const px = this.paddingX;
+                const py = this.paddingY;
+                
+                const boardX = Math.round((x - px) / cs);
+                const boardY = Math.round((y - py) / cs);
+                
+                // 边界检查
+                if (boardX < 0 || boardX > 8 || boardY < 0 || boardY > 9) {
+                    this.selected = null;
+                    this.draw();
+                    return;
+                }
+                
+                const piece = this.board[boardY][boardX];
+                const isRedPiece = piece !== '.' && piece === piece.toUpperCase();
+                
+                if (this.selected) {
+                    // 尝试移动
+                    if (this.isValidMove(this.selected.x, this.selected.y, boardX, boardY)) {
+                        this.move(this.selected.x, this.selected.y, boardX, boardY);
+                        this.selected = null;
+                    } else if (piece !== '.' && isRedPiece === (this.currentPlayer === 'red')) {
+                        // 换选己方棋子
+                        this.selected = {x: boardX, y: boardY};
+                        this.draw();
+                    } else {
+                        // 取消选择
+                        this.selected = null;
+                        this.draw();
+                    }
+                } else {
+                    // 新选棋子
+                    if (piece !== '.' && isRedPiece === (this.currentPlayer === 'red')) {
+                        this.selected = {x: boardX, y: boardY};
+                        this.draw();
+                    }
+                }
+            }
+            
+            reset() {
+                // 初始化棋盘
+                this.board = [
+                    ['r', 'n', 'b', 'a', 'k', 'a', 'b', 'n', 'r'],
+                    ['.', '.', '.', '.', '.', '.', '.', '.', '.'],
+                    ['.', 'c', '.', '.', '.', '.', '.', 'c', '.'],
+                    ['p', '.', 'p', '.', 'p', '.', 'p', '.', 'p'],
+                    ['.', '.', '.', '.', '.', '.', '.', '.', '.'],
+                    ['.', '.', '.', '.', '.', '.', '.', '.', '.'],
+                    ['P', '.', 'P', '.', 'P', '.', 'P', '.', 'P'],
+                    ['.', 'C', '.', '.', '.', '.', '.', 'C', '.'],
+                    ['.', '.', '.', '.', '.', '.', '.', '.', '.'],
+                    ['R', 'N', 'B', 'A', 'K', 'A', 'B', 'N', 'R']
+                ];
+                
+                this.currentPlayer = 'red';
+                this.selected = null;
+                this.history = [];
+                this.capturedPieces = [];
+                this.updateStatus();
+                this.updateCaptured();
+                this.draw();
+            }
+            
+            getPieceName(piece) {
+                const names = {
+                    'r': '俥', 'n': '傌', 'b': '相', 'a': '仕', 'k': '帥', 'c': '炮', 'p': '兵',
+                    'R': '車', 'N': '馬', 'B': '象', 'A': '士', 'K': '將', 'C': '砲', 'P': '卒'
+                };
+                return names[piece] || '';
+            }
+            
+            draw() {
+                const ctx = this.ctx;
+                const width = this.canvas.width;
+                const height = this.canvas.height;
+                const cs = this.cellSize;
+                const px = this.paddingX;
+                const py = this.paddingY;
+                
+                // 清空画布
+                ctx.fillStyle = '#f0d9b5';
+                ctx.fillRect(0, 0, width, height);
+                
+                // 绘制网格
+                ctx.strokeStyle = '#333';
+                ctx.lineWidth = 1.5;
+                ctx.lineCap = 'round';
+                
+                // 横线
+                for (let i = 0; i <= 9; i++) {
+                    ctx.beginPath();
+                    ctx.moveTo(px, py + i * cs);
+                    ctx.lineTo(px + 8 * cs, py + i * cs);
+                    ctx.stroke();
+                }
+                
+                // 竖线（中间断开）
+                for (let i = 0; i <= 8; i++) {
+                    ctx.beginPath();
+                    ctx.moveTo(px + i * cs, py);
+                    ctx.lineTo(px + i * cs, py + 4 * cs);
+                    ctx.stroke();
+                    
+                    ctx.beginPath();
+                    ctx.moveTo(px + i * cs, py + 5 * cs);
+                    ctx.lineTo(px + i * cs, py + 9 * cs);
+                    ctx.stroke();
+                }
+                
+                // 九宫格斜线
+                ctx.beginPath();
+                ctx.moveTo(px + 3 * cs, py);
+                ctx.lineTo(px + 5 * cs, py + 2 * cs);
+                ctx.moveTo(px + 5 * cs, py);
+                ctx.lineTo(px + 3 * cs, py + 2 * cs);
+                ctx.moveTo(px + 3 * cs, py + 7 * cs);
+                ctx.lineTo(px + 5 * cs, py + 9 * cs);
+                ctx.moveTo(px + 5 * cs, py + 7 * cs);
+                ctx.lineTo(px + 3 * cs, py + 9 * cs);
+                ctx.stroke();
+                
+                // 绘制所有棋子
+                for (let y = 0; y < 10; y++) {
+                    for (let x = 0; x < 9; x++) {
+                        const piece = this.board[y][x];
+                        if (piece !== '.') {
+                            this.drawPiece(x, y, piece);
+                        }
+                    }
+                }
+                
+                // 高亮选中
+                if (this.selected) {
+                    ctx.strokeStyle = '#e94560';
+                    ctx.lineWidth = 3;
+                    ctx.beginPath();
+                    ctx.arc(px + this.selected.x * cs, py + this.selected.y * cs, cs * 0.4, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+            }
+            
+            drawPiece(x, y, piece) {
+                const ctx = this.ctx;
+                const cs = this.cellSize;
+                const px = this.paddingX + x * cs;
+                const py = this.paddingY + y * cs;
+                const isRed = piece === piece.toUpperCase();
+                
+                // 棋子外圆
+                ctx.beginPath();
+                ctx.arc(px, py, cs * 0.38, 0, Math.PI * 2);
+                
+                // 渐变色
+                const grad = ctx.createRadialGradient(px-2, py-2, 0, px, py, cs*0.38);
+                if (isRed) {
+                    grad.addColorStop(0, '#ff6b6b');
+                    grad.addColorStop(1, '#cc0000');
+                } else {
+                    grad.addColorStop(0, '#666');
+                    grad.addColorStop(1, '#222');
+                }
+                ctx.fillStyle = grad;
+                ctx.fill();
+                
+                // 边框
+                ctx.strokeStyle = isRed ? '#ffaaaa' : '#888';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                
+                // 文字（微信需要用标准字体）
+                ctx.fillStyle = '#fff';
+                ctx.font = `bold ${Math.floor(cs * 0.35)}px sans-serif`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                
+                const text = this.getPieceName(piece);
+                ctx.fillText(text, px, py + 1);
+            }
+            
+            isValidMove(fromX, fromY, toX, toY) {
+                const piece = this.board[fromY][fromX];
+                const target = this.board[toY][toX];
+                const isRed = piece === piece.toUpperCase();
+                
+                // 不能吃己方
+                if (target !== '.' && (target === target.toUpperCase()) === isRed) {
+                    return false;
+                }
+                
+                const dx = toX - fromX;
+                const dy = toY - fromY;
+                const adx = Math.abs(dx);
+                const ady = Math.abs(dy);
+                
+                switch(piece.toLowerCase()) {
+                    case 'k': // 将/帅
+                        if (adx + ady !== 1) return false;
+                        if (toX < 3 || toX > 5) return false;
+                        if (isRed && toY < 7) return false;
+                        if (!isRed && toY > 2) return false;
+                        // 将帅见面
+                        if (target.toLowerCase() === 'k' && fromX === toX) {
+                            for (let y = Math.min(fromY, toY) + 1; y < Math.max(fromY, toY); y++) {
+                                if (this.board[y][fromX] !== '.') return true;
+                            }
+                        }
+                        return true;
+                        
+                    case 'a': // 士
+                        if (adx !== 1 || ady !== 1) return false;
+                        if (toX < 3 || toX > 5) return false;
+                        if (isRed && toY < 7) return false;
+                        if (!isRed && toY > 2) return false;
+                        return true;
+                        
+                    case 'b': // 象
+                        if (adx !== 2 || ady !== 2) return false;
+                        if (isRed && toY < 5) return false;
+                        if (!isRed && toY > 4) return false;
+                        if (this.board[fromY + dy/2][fromX + dx/2] !== '.') return false;
+                        return true;
+                        
+                    case 'n': // 马
+                        if (!((adx === 1 && ady === 2) || (adx === 2 && ady === 1))) return false;
+                        if (adx === 2) {
+                            if (this.board[fromY][fromX + dx/2] !== '.') return false;
+                        } else {
+                            if (this.board[fromY + dy/2][fromX] !== '.') return false;
+                        }
+                        return true;
+                        
+                    case 'r': // 车
+                        if (adx !== 0 && ady !== 0) return false;
+                        return this.checkLine(fromX, fromY, toX, toY);
+                        
+                    case 'c': // 炮
+                        if (adx !== 0 && ady !== 0) return false;
+                        const count = this.countBetween(fromX, fromY, toX, toY);
+                        if (target === '.') return count === 0;
+                        return count === 1;
+                        
+                    case 'p': // 兵
+                        if (isRed) {
+                            if (fromY > 4) return dx === 0 && dy === -1;
+                            return (dx === 0 && dy === -1) || (ady === 0 && adx === 1);
+                        } else {
+                            if (fromY < 5) return dx === 0 && dy === 1;
+                            return (dx === 0 && dy === 1) || (ady === 0 && adx === 1);
+                        }
+                }
+                return false;
+            }
+            
+            checkLine(x1, y1, x2, y2) {
+                if (x1 === x2) {
+                    const min = Math.min(y1, y2);
+                    const max = Math.max(y1, y2);
+                    for (let y = min + 1; y < max; y++) {
+                        if (this.board[y][x1] !== '.') return false;
+                    }
+                } else {
+                    const min = Math.min(x1, x2);
+                    const max = Math.max(x1, x2);
+                    for (let x = min + 1; x < max; x++) {
+                        if (this.board[y1][x] !== '.') return false;
+                    }
+                }
+                return true;
+            }
+            
+            countBetween(x1, y1, x2, y2) {
+                let count = 0;
+                if (x1 === x2) {
+                    const min = Math.min(y1, y2);
+                    const max = Math.max(y1, y2);
+                    for (let y = min + 1; y < max; y++) {
+                        if (this.board[y][x1] !== '.') count++;
+                    }
+                } else {
+                    const min = Math.min(x1, x2);
+                    const max = Math.max(x1, x2);
+                    for (let x = min + 1; x < max; x++) {
+                        if (this.board[y1][x] !== '.') count++;
+                    }
+                }
+                return count;
+            }
+            
+            move(fromX, fromY, toX, toY) {
+                const piece = this.board[fromY][fromX];
+                const target = this.board[toY][toX];
+                
+                this.history.push({
+                    board: JSON.parse(JSON.stringify(this.board)),
+                    player: this.currentPlayer
+                });
+                
+                if (target !== '.') {
+                    this.capturedPieces.push(target);
+                    this.updateCaptured();
+                    
+                    if (target.toLowerCase() === 'k') {
+                        setTimeout(() => {
+                            alert(`${this.currentPlayer === 'red' ? '🔴红方' : '⚫黑方'}获胜！`);
+                        }, 50);
+                    }
+                }
+                
+                this.board[toY][toX] = piece;
+                this.board[fromY][fromX] = '.';
+                this.currentPlayer = this.currentPlayer === 'red' ? 'black' : 'red';
+                this.updateStatus();
+                this.draw();
+            }
+            
+            undo() {
+                if (this.history.length === 0) return;
+                
+                const last = this.history.pop();
+                this.board = last.board;
+                this.currentPlayer = last.player;
+                this.selected = null;
+                
+                // 重新计算吃子
+                this.recalcCaptured();
+                this.updateStatus();
+                this.updateCaptured();
+                this.draw();
+            }
+            
+            recalcCaptured() {
+                const initial = "rnbakabnrc.c.....c.p.p.p.p.p....................P.P.P.P.P.C.....C.RNBAKABNR";
+                let current = '';
+                for (let row of this.board) {
+                    for (let p of row) {
+                        current += p;
+                    }
+                }
+                
+                this.capturedPieces = [];
+                const counts = {};
+                
+                for (let p of initial) {
+                    counts[p] = (counts[p] || 0) + 1;
+                }
+                for (let p of current) {
+                    if (p !== '.') counts[p]--;
+                }
+                
+                for (let p in counts) {
+                    if (p !== '.' && counts[p] > 0) {
+                        for (let i = 0; i < counts[p]; i++) {
+                            this.capturedPieces.push(p);
+                        }
+                    }
+                }
+            }
+            
+            restart() {
+                if (confirm('确定重新开始？')) {
+                    this.reset();
+                }
+            }
+            
+            updateStatus() {
+                this.statusEl.textContent = `${this.currentPlayer === 'red' ? '🔴红方' : '⚫黑方'}走棋`;
+                this.statusEl.style.background = this.currentPlayer === 'red' ? 
+                    'rgba(255, 68, 68, 0.3)' : 'rgba(100, 100, 100, 0.3)';
+            }
+            
+            updateCaptured() {
+                this.capturedEl.innerHTML = '';
+                this.capturedPieces.forEach(p => {
+                    const div = document.createElement('div');
+                    div.className = `captured-piece ${p === p.toUpperCase() ? 'captured-red' : 'captured-black'}`;
+                    div.textContent = this.getPieceName(p);
+                    this.capturedEl.appendChild(div);
+                });
+            }
+        }
+        
+        // 启动
+        const game = new ChineseChess();
+    </script>
+</body>
+</html>
